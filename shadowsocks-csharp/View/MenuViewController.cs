@@ -2,19 +2,16 @@
 using Shadowsocks.Model;
 using Shadowsocks.Properties;
 using System;
-using System.IO;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.Text;
-using System.Windows.Forms;
 using System.Runtime.InteropServices;
-
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Windows.Forms;
 using ZXing;
 using ZXing.Common;
 using ZXing.QrCode;
-using System.Threading;
-using System.Text.RegularExpressions;
 
 namespace Shadowsocks.View
 {
@@ -73,6 +70,9 @@ namespace Shadowsocks.View
         private bool configfrom_open = false;
         private List<EventParams> eventList = new List<EventParams>();
 
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        static extern bool DestroyIcon(IntPtr handle);
+
         public MenuViewController(ShadowsocksController controller)
         {
             this.controller = controller;
@@ -115,13 +115,13 @@ namespace Shadowsocks.View
         {
             if (timerDelayCheckUpdate != null)
             {
-                if (timerDelayCheckUpdate.Interval <= 1000.0 * 30)
+                //if (timerDelayCheckUpdate.Interval <= 1000.0 * 30)
+                //{
+                //    timerDelayCheckUpdate.Interval = 1000.0 * 60 * 5;
+                //}
+                //else
                 {
-                    timerDelayCheckUpdate.Interval = 1000.0 * 60 * 5;
-                }
-                else
-                {
-                    timerDelayCheckUpdate.Interval = 1000.0 * 60 * 60 * 2;
+                    timerDelayCheckUpdate.Interval = 1000.0 * 60 * 60 * 6;
                 }
             }
             updateChecker.CheckUpdate(controller.GetCurrentConfiguration());
@@ -140,7 +140,7 @@ namespace Shadowsocks.View
 
         private void UpdateTrayIcon()
         {
-            int dpi;
+            int dpi = 96;
             using (Graphics graphics = Graphics.FromHwnd(IntPtr.Zero))
             {
                 dpi = (int)graphics.DpiX;
@@ -152,10 +152,10 @@ namespace Shadowsocks.View
 
             try
             {
-                using (Bitmap icon = new Bitmap("icon.png"))
-                {
-                    _notifyIcon.Icon = Icon.FromHandle(icon.GetHicon());
-                }
+                Bitmap icon = new Bitmap("icon.png");
+                Icon newIcon = Icon.FromHandle(icon.GetHicon());
+                icon.Dispose();
+                _notifyIcon.Icon = newIcon;
             }
             catch
             {
@@ -189,22 +189,25 @@ namespace Shadowsocks.View
                     mul_r = 0.4;
                 }
 
-                using (Bitmap iconCopy = new Bitmap(icon))
+                Bitmap iconCopy = new Bitmap(icon);
+                for (int x = 0; x < iconCopy.Width; x++)
                 {
-                    for (int x = 0; x < iconCopy.Width; x++)
+                    for (int y = 0; y < iconCopy.Height; y++)
                     {
-                        for (int y = 0; y < iconCopy.Height; y++)
-                        {
-                            Color color = icon.GetPixel(x, y);
-                            iconCopy.SetPixel(x, y,
-                                Color.FromArgb((byte)(color.A * mul_a),
-                                ((byte)(color.R * mul_r)),
-                                ((byte)(color.G * mul_g)),
-                                ((byte)(color.B * mul_b))));
-                        }
+                        Color color = icon.GetPixel(x, y);
+                        iconCopy.SetPixel(x, y,
+
+                            Color.FromArgb((byte)(color.A * mul_a),
+                            ((byte)(color.R * mul_r)),
+                            ((byte)(color.G * mul_g)),
+                            ((byte)(color.B * mul_b))));
                     }
-                    _notifyIcon.Icon = Icon.FromHandle(iconCopy.GetHicon());
                 }
+                Icon newIcon = Icon.FromHandle(iconCopy.GetHicon());
+                icon.Dispose();
+                iconCopy.Dispose();
+
+                _notifyIcon.Icon = newIcon;
             }
 
             // we want to show more details but notify icon title is limited to 63 characters
@@ -589,7 +592,7 @@ namespace Shadowsocks.View
                     controller.SaveServersConfig(config);
                 }
             }
-            
+
             if (count > 0)
             {
                 if (updateFreeNodeChecker.noitify)
@@ -940,7 +943,7 @@ namespace Shadowsocks.View
                 {
                     string name = dlg.FileName;
                     Configuration cfg = Configuration.LoadFile(name);
-                    if (cfg.configs.Count == 1 && cfg.configs[0].server == Configuration.GetDefaultServer().server)
+                    if (cfg == null || (cfg.configs.Count == 1 && cfg.configs[0].server == Configuration.GetDefaultServer().server))
                     {
                         MessageBox.Show("Load config file failed", "ShadowsocksR");
                     }
@@ -1150,6 +1153,12 @@ namespace Shadowsocks.View
 
         private void AServerItem_Click(object sender, EventArgs e)
         {
+            Configuration config = controller.GetCurrentConfiguration();
+            Console.WriteLine("config.checkSwitchAutoCloseAll:" + config.checkSwitchAutoCloseAll);
+            if (config.checkSwitchAutoCloseAll)
+            {
+                controller.DisconnectAllConnections();
+            }
             MenuItem item = (MenuItem)sender;
             controller.SelectServerIndex((int)item.Tag);
         }
@@ -1191,12 +1200,7 @@ namespace Shadowsocks.View
 
         private void DisconnectCurrent_Click(object sender, EventArgs e)
         {
-            Configuration config = controller.GetCurrentConfiguration();
-            for (int id = 0; id < config.configs.Count; ++id)
-            {
-                Server server = config.configs[id];
-                server.GetConnections().CloseAll();
-            }
+            controller.DisconnectAllConnections();
         }
 
         private void URL_Split(string text, ref List<string> out_urls)
